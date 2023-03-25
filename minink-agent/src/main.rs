@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use sqlx::{Connection, SqliteConnection};
 
-use minink::LogEntry;
+use minink_agent::LogEntry;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// see journalctl(1) json format
@@ -142,6 +142,8 @@ async fn ingest_logs_job(mut receiver: UnboundedReceiver<LogEntry>) -> Result<()
     }
     Ok(())
 }
+
+//// NOTE XXX https://github.com/tokio-rs/axum/blob/main/examples/chat/src/main.rs
 
 #[tokio::main]
 async fn main() -> Result<()> {
