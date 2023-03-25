@@ -1,9 +1,10 @@
 use chrono::NaiveDateTime;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogEntry {
     pub message: String,
     pub hostname: String,
-    pub systemd_unit: String,
+    pub service: String,
     pub timestamp: NaiveDateTime,
 }

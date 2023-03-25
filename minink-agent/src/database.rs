@@ -25,10 +25,10 @@ impl LogDatabase {
         let mut tx = self.conn.begin().await?;
         dbg!(&entry);
         sqlx::query!(
-            "insert into logs(message, hostname, systemd_unit, timestamp) values($1, $2, $3, $4);",
+            "insert into logs(message, hostname, service, timestamp) values($1, $2, $3, $4);",
             entry.message,
             entry.hostname,
-            entry.systemd_unit,
+            entry.service,
             entry.timestamp,
         )
         .execute(&mut tx)

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+
+<script src='script.js'></script>
+
+<style>
+.loglist {
+    font-family: monospace;
+    border-collapse: collapse;
+
+    table-layout: fixed;
+    width: 100%;
+}
+
+.loglist th {
+    border: 1px solid #666;
+    padding: 8px;
+}
+
+.loglist td {
+    border: 1px solid #AAA;
+    padding: 3px;
+    overflow: clip;
+    white-space: nowrap;
+}
+
+.loglist td:nth-child(3) {
+    direction: rtl;
+}
+
+.loglist tr:nth-child(even) {
+    background-color: #f2f2f2;
+}
+</style>
+
+<form>
+    <input type="checkbox" name="live" id="live-button">
+    <label for="live"> LIVE</label>
+</form>
+
+<table id="loglist" class="loglist">
+    <tr>
+        <th style="width: 180px">
+            Date
+        </th>
+        <th style="width: 100px">
+            Host
+        </th>
+        <th style="width: 10%">
+            Service
+        </th>
+        <th>
+            Content
+        </th>
+    </tr>
+</table>

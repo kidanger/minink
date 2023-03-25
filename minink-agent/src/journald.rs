@@ -9,7 +9,7 @@ use futures_lite::{AsyncBufReadExt, StreamExt};
 
 use serde::Deserialize;
 
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::broadcast;
 
 use minink_common::LogEntry;
 
@@ -48,27 +48,29 @@ struct JournaldRawLogEntry {
     systemd_unit: Option<String>,
     #[serde(rename = "__REALTIME_TIMESTAMP")]
     timestamp: String,
+    #[serde(rename = "SYSLOG_IDENTIFIER")]
+    syslog_identifier: Option<String>,
+    #[serde(rename = "_EXE")]
+    exe: Option<String>,
 }
 
 pub async fn follow_logs(
-    sender: UnboundedSender<LogEntry>,
+    sender: broadcast::Sender<LogEntry>,
     since_timestamp: Option<NaiveDateTime>,
 ) -> Result<()> {
     let since_format = if let Some(since) = since_timestamp {
         let now = chrono::Utc::now().naive_utc();
-        dbg!(now);
-        dbg!(since);
         let duration = now - since;
         let ms = duration.num_milliseconds();
         format!("-{}s{}ms", ms / 1000, ms % 1000)
     } else {
         "1 day ago".to_string()
     };
-    dbg!(&since_format);
+
     let mut child = Command::new("journalctl")
         .arg("--follow")
         .arg("--output=json")
-        .arg("--output-fields=MESSAGE,_HOSTNAME,_SYSTEMD_UNIT,__REALTIME_TIMESTAMP")
+        .arg("--output-fields=MESSAGE,_HOSTNAME,_SYSTEMD_UNIT,__REALTIME_TIMESTAMP,SYSLOG_IDENTIFIER,_EXE")
         .arg("--all")
         .arg(&format!("--since={}", since_format))
         .stdout(Stdio::piped())
@@ -85,15 +87,34 @@ pub async fn follow_logs(
 }
 
 fn parse_log_entry(line: &str) -> Result<LogEntry> {
-    //dbg!(&line);
     let raw: JournaldRawLogEntry = serde_json::from_str(line)?;
-    let timestamp: i64 = raw.timestamp.parse()?;
+    let timestamp = raw.timestamp.parse()?;
     let timestamp = NaiveDateTime::from_timestamp_micros(timestamp).unwrap();
+    let service = format!(
+        "{}{}{}",
+        if let Some(unit) = &raw.systemd_unit {
+            unit.to_owned() + ";"
+        } else {
+            "".to_string()
+        },
+        if let Some(syslog) = &raw.syslog_identifier {
+            syslog.to_owned() + ";"
+        } else {
+            "".to_string()
+        },
+        if let Some(exe) = &raw.exe {
+            exe.to_owned()
+        } else {
+            "".to_string()
+        }
+    )
+    .trim_end_matches(';')
+    .to_owned();
     let message = raw.message.to_string();
     Ok(LogEntry {
         message,
         hostname: raw.hostname,
-        systemd_unit: raw.systemd_unit.unwrap_or_default(),
+        service,
         timestamp,
     })
 }

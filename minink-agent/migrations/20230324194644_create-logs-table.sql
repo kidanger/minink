@@ -1,7 +1,7 @@
 create table logs (
     message text not null,
     hostname text not null,
-    systemd_unit text not null,
+    service text not null,
     timestamp timestamp not null
 );
 
