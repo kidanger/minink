@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "minink-agent",
+    "minink-common",
 ]
 
 [profile.dev.package.sqlx-macros]

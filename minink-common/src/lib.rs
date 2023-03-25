@@ -1,6 +1,6 @@
 use chrono::NaiveDateTime;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct LogEntry {
     pub message: String,
     pub hostname: String,
