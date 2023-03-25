@@ -9,37 +9,35 @@ use axum::{
     routing::get,
     Router,
 };
-use minink_common::LogEntry;
-use tokio::sync::broadcast;
 
 use std::{net::SocketAddr, path::PathBuf};
+
 use tower_http::{
     services::ServeDir,
     trace::{DefaultMakeSpan, TraceLayer},
 };
 
+use crate::{journald::JournaldLogSource, logstream::LogStream};
+
 #[derive(Debug, Clone)]
 struct AppState {
-    log_watcher: broadcast::Sender<LogEntry>,
+    logsource: JournaldLogSource,
 }
 
-pub async fn main(log_watcher: broadcast::Sender<LogEntry>) -> Result<()> {
-    let appstate = AppState { log_watcher };
+pub async fn main(logsource: JournaldLogSource) -> Result<()> {
+    let appstate = AppState { logsource };
 
     let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
 
-    // build our application with some routes
     let app = Router::new()
         .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
         .route("/ws/live", get(ws_handler))
         .with_state(appstate)
-        // logging so we can see whats going on
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::default().include_headers(true)),
         );
 
-    // run it with hyper
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
@@ -49,14 +47,20 @@ pub async fn main(log_watcher: broadcast::Sender<LogEntry>) -> Result<()> {
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    let rx = state.log_watcher.subscribe();
-    ws.on_upgrade(move |socket| handle_socket(socket, rx))
+    let logstream = state.logsource.subscribe();
+    ws.on_upgrade(move |socket| handle_socket(socket, logstream))
 }
 
-async fn handle_socket(mut socket: WebSocket, mut log_receiver: broadcast::Receiver<LogEntry>) {
-    loop {
-        let entry = log_receiver.recv().await.unwrap();
-        let payload = serde_json::to_string(&entry).unwrap();
-        socket.send(Message::Text(payload)).await.unwrap();
+async fn handle_socket(socket: WebSocket, logstream: LogStream) {
+    async fn work(mut socket: WebSocket, mut logstream: LogStream) -> Result<()> {
+        loop {
+            let entry = logstream.pull_one().await?;
+            let payload = serde_json::to_string(&entry)?;
+            socket.send(Message::Text(payload)).await?;
+        }
+    }
+
+    if let Err(err) = work(socket, logstream).await {
+        tracing::info!("{}", err);
     }
 }

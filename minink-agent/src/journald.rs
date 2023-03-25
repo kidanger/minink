@@ -13,6 +13,70 @@ use tokio::sync::broadcast;
 
 use minink_common::LogEntry;
 
+use crate::logstream::LogStream;
+
+#[derive(Debug, Clone)]
+pub struct JournaldLogSource {
+    sender: broadcast::Sender<LogEntry>,
+}
+
+impl JournaldLogSource {
+    pub fn new() -> Self {
+        let (tx, _) = broadcast::channel(100000);
+        JournaldLogSource { sender: tx }
+    }
+
+    pub fn subscribe(&self) -> LogStream {
+        let rx = self.sender.subscribe();
+        LogStream::new(rx)
+    }
+
+    pub async fn follow(&self, since_timestamp: Option<NaiveDateTime>) -> Result<()> {
+        let since_format = if let Some(since) = since_timestamp {
+            let now = chrono::Utc::now().naive_utc();
+            let duration = now - since;
+            let ms = duration.num_milliseconds();
+            format!("-{}s{}ms", ms / 1000, ms % 1000)
+        } else {
+            "1 day ago".to_string()
+        };
+
+        let mut child = Command::new("journalctl")
+        .arg("--follow")
+        .arg("--output=json")
+        .arg("--output-fields=MESSAGE,_HOSTNAME,_SYSTEMD_UNIT,__REALTIME_TIMESTAMP,SYSLOG_IDENTIFIER,_EXE")
+        .arg("--all")
+        .arg(&format!("--since={}", since_format))
+        .stdout(Stdio::piped())
+        .spawn()?;
+
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+
+        while let Some(line) = lines.next().await {
+            let entry = parse_log_entry(&line?)?;
+            self.sender.send(entry)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct JournaldRawLogEntry {
+    #[serde(rename = "MESSAGE")]
+    message: JournaldMessage,
+    #[serde(rename = "_HOSTNAME")]
+    hostname: String,
+    #[serde(rename = "_SYSTEMD_UNIT")]
+    systemd_unit: Option<String>,
+    #[serde(rename = "__REALTIME_TIMESTAMP")]
+    timestamp: String,
+    #[serde(rename = "SYSLOG_IDENTIFIER")]
+    syslog_identifier: Option<String>,
+    #[serde(rename = "_EXE")]
+    exe: Option<String>,
+}
+
 /// see journalctl(1) json format
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -36,54 +100,6 @@ impl std::fmt::Display for JournaldMessage {
             }
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct JournaldRawLogEntry {
-    #[serde(rename = "MESSAGE")]
-    message: JournaldMessage,
-    #[serde(rename = "_HOSTNAME")]
-    hostname: String,
-    #[serde(rename = "_SYSTEMD_UNIT")]
-    systemd_unit: Option<String>,
-    #[serde(rename = "__REALTIME_TIMESTAMP")]
-    timestamp: String,
-    #[serde(rename = "SYSLOG_IDENTIFIER")]
-    syslog_identifier: Option<String>,
-    #[serde(rename = "_EXE")]
-    exe: Option<String>,
-}
-
-pub async fn follow_logs(
-    sender: broadcast::Sender<LogEntry>,
-    since_timestamp: Option<NaiveDateTime>,
-) -> Result<()> {
-    let since_format = if let Some(since) = since_timestamp {
-        let now = chrono::Utc::now().naive_utc();
-        let duration = now - since;
-        let ms = duration.num_milliseconds();
-        format!("-{}s{}ms", ms / 1000, ms % 1000)
-    } else {
-        "1 day ago".to_string()
-    };
-
-    let mut child = Command::new("journalctl")
-        .arg("--follow")
-        .arg("--output=json")
-        .arg("--output-fields=MESSAGE,_HOSTNAME,_SYSTEMD_UNIT,__REALTIME_TIMESTAMP,SYSLOG_IDENTIFIER,_EXE")
-        .arg("--all")
-        .arg(&format!("--since={}", since_format))
-        .stdout(Stdio::piped())
-        .spawn()?;
-
-    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-
-    while let Some(line) = lines.next().await {
-        let entry = parse_log_entry(&line?)?;
-        sender.send(entry)?;
-    }
-
-    Ok(())
 }
 
 fn parse_log_entry(line: &str) -> Result<LogEntry> {

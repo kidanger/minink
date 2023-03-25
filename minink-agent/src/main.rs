@@ -1,23 +1,21 @@
 use anyhow::Result;
 
-use tokio::sync::broadcast;
+use journald::JournaldLogSource;
+
+use logstream::LogStream;
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use minink_common::LogEntry;
-
 mod database;
 mod journald;
+mod logstream;
 mod websocket;
 
 use database::LogDatabase;
 
-async fn ingest_logs_job(
-    db: &mut LogDatabase,
-    mut receiver: broadcast::Receiver<LogEntry>,
-) -> Result<()> {
+async fn ingest_logs_job(db: &mut LogDatabase, mut logstream: LogStream) -> Result<()> {
     loop {
-        let entry = receiver.recv().await?;
+        let entry = logstream.pull_one().await?;
         db.insert_log(&entry).await?;
     }
 }
@@ -33,19 +31,22 @@ async fn main() -> Result<()> {
         .init();
 
     let mut db = database::get_database("sqlite://logs.db").await?;
-
     let last_timestamp = db.last_timestamp().await?;
 
-    let (tx, rx) = broadcast::channel(100000);
-    let j1 = {
-        let tx = tx.clone();
-        tokio::spawn(async move { journald::follow_logs(tx, last_timestamp).await })
+    let logsource = JournaldLogSource::new();
+
+    // subscribe before starting the `follow` task
+    let logstream = logsource.subscribe();
+    let j1 = tokio::spawn(async move { ingest_logs_job(&mut db, logstream).await });
+
+    let j2 = {
+        let logsource = logsource.clone();
+        tokio::spawn(async move { logsource.follow(last_timestamp).await })
     };
-    let j2 = tokio::spawn(async move { ingest_logs_job(&mut db, rx).await });
 
-    websocket::main(tx).await?;
+    let j3 = tokio::spawn(websocket::main(logsource));
 
-    tokio::try_join!(j1, j2)?;
+    tokio::try_join!(j1, j2, j3)?;
 
     Ok(())
 }
