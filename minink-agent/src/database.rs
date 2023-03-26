@@ -6,7 +6,7 @@ use futures::TryStreamExt;
 
 use minink_common::{Filter, LogEntry};
 
-use sqlx::{Connection, SqliteConnection};
+use sqlx::{Connection, QueryBuilder, Sqlite, SqliteConnection};
 
 #[derive(Debug)]
 pub struct LogDatabase {
@@ -37,6 +37,24 @@ impl LogDatabase {
         )
         .execute(&mut tx)
         .await?;
+        Ok(tx.commit().await?)
+    }
+
+    pub async fn insert_logs(&mut self, entries: &[LogEntry]) -> Result<()> {
+        assert!(entries.len() < 65535 / 4);
+        dbg!(&entries);
+
+        let mut tx = self.conn.begin().await?;
+        QueryBuilder::new("insert into logs(message, hostname, service, timestamp) ")
+            .push_values(entries, |mut b, entry| {
+                b.push_bind(&entry.message)
+                    .push_bind(&entry.hostname)
+                    .push_bind(&entry.service)
+                    .push_bind(entry.timestamp);
+            })
+            .build()
+            .execute(&mut tx)
+            .await?;
         Ok(tx.commit().await?)
     }
 

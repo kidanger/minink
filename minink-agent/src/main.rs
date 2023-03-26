@@ -29,9 +29,14 @@ struct Args {
 }
 
 async fn ingest_logs_job(mut db: LogDatabase, mut logstream: LogStream) -> Result<()> {
+    let mut batch = Vec::with_capacity(1024);
     loop {
-        let entry = logstream.pull_one().await?;
-        db.insert_log(&entry).await?;
+        while batch.len() < batch.capacity() {
+            let entry = logstream.pull_one().await?;
+            batch.push(entry);
+        }
+        db.insert_logs(&batch).await?;
+        batch.clear();
     }
 }
 
