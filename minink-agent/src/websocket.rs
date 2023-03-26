@@ -3,35 +3,43 @@ use anyhow::Result;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
     response::IntoResponse,
     routing::get,
-    Router,
+    Json, Router,
 };
+use minink_common::{Filter, LogEntry, ServiceName};
+use serde::Deserialize;
+use tokio::sync::Mutex;
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use tower_http::{
     services::ServeDir,
     trace::{DefaultMakeSpan, TraceLayer},
 };
 
-use crate::{journald::JournaldLogSource, logstream::LogStream};
+use crate::{database::LogDatabase, journald::JournaldLogSource, logstream::LogStream};
 
 #[derive(Debug, Clone)]
 struct AppState {
     logsource: JournaldLogSource,
+    database: Arc<Mutex<LogDatabase>>,
 }
 
-pub async fn main(logsource: JournaldLogSource) -> Result<()> {
-    let appstate = AppState { logsource };
+pub async fn main(logsource: JournaldLogSource, database: LogDatabase) -> Result<()> {
+    let appstate = AppState {
+        logsource,
+        database: Arc::new(Mutex::new(database)),
+    };
 
     let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
 
     let app = Router::new()
         .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
         .route("/ws/live", get(ws_handler))
+        .route("/api/extract", get(extract))
         .with_state(appstate)
         .layer(
             TraceLayer::new_for_http()
@@ -46,8 +54,35 @@ pub async fn main(logsource: JournaldLogSource) -> Result<()> {
     Ok(())
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    let logstream = state.logsource.subscribe();
+#[derive(Debug, Deserialize)]
+struct WSParams {
+    #[serde(default)]
+    services: Option<String>,
+    #[serde(default)]
+    message_keywords: Option<String>,
+}
+
+fn parse_query_list(services: Option<String>) -> Option<Vec<String>> {
+    services.as_ref().map(|services| {
+        services
+            .split(',')
+            .map(str::to_string)
+            .collect::<Vec<ServiceName>>()
+    })
+}
+
+#[axum_macros::debug_handler]
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    Query(params): Query<WSParams>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let filter = Filter {
+        services: parse_query_list(params.services),
+        message_keywords: parse_query_list(params.message_keywords),
+    };
+    let logstream = state.logsource.subscribe().with_filter(filter);
+    dbg!(&logstream);
     ws.on_upgrade(move |socket| handle_socket(socket, logstream))
 }
 
@@ -63,4 +98,28 @@ async fn handle_socket(socket: WebSocket, logstream: LogStream) {
     if let Err(err) = work(socket, logstream).await {
         tracing::info!("{}", err);
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtractParams {
+    #[serde(default)]
+    services: Option<String>,
+    #[serde(default)]
+    message_keywords: Option<String>,
+}
+
+#[axum_macros::debug_handler]
+async fn extract(
+    Query(params): Query<ExtractParams>,
+    State(state): State<AppState>,
+) -> Json<Vec<LogEntry>> {
+    let filter = Filter {
+        services: parse_query_list(params.services),
+        message_keywords: parse_query_list(params.message_keywords),
+    };
+    let entries = {
+        let mut db = state.database.lock().await;
+        db.extract(&filter).await.unwrap()
+    };
+    Json(entries)
 }

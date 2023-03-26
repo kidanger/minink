@@ -2,10 +2,13 @@ use anyhow::Result;
 
 use chrono::NaiveDateTime;
 
-use minink_common::LogEntry;
+use futures::TryStreamExt;
+
+use minink_common::{Filter, LogEntry};
 
 use sqlx::{Connection, SqliteConnection};
 
+#[derive(Debug)]
 pub struct LogDatabase {
     conn: SqliteConnection,
 }
@@ -25,7 +28,8 @@ impl LogDatabase {
         let mut tx = self.conn.begin().await?;
         dbg!(&entry);
         sqlx::query!(
-            "insert into logs(message, hostname, service, timestamp) values($1, $2, $3, $4);",
+            r#"insert into logs(message, hostname, service, timestamp)
+            values($1, $2, $3, $4);"#,
             entry.message,
             entry.hostname,
             entry.service,
@@ -34,6 +38,31 @@ impl LogDatabase {
         .execute(&mut tx)
         .await?;
         Ok(tx.commit().await?)
+    }
+
+    pub async fn extract(&mut self, filter: &Filter) -> Result<Vec<LogEntry>> {
+        let len = 100;
+        let mut iter = sqlx::query_as!(
+            LogEntry,
+            r#"
+            select *
+            from logs
+            order by timestamp desc;
+            "#
+        )
+        .fetch(&mut self.conn);
+
+        let mut entries = Vec::with_capacity(len);
+        while let Some(entry) = iter.try_next().await? {
+            if filter.accept(&entry) {
+                entries.push(entry)
+            }
+            if entries.len() >= len {
+                break;
+            }
+        }
+        entries.reverse();
+        Ok(entries)
     }
 }
 

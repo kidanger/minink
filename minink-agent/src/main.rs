@@ -30,21 +30,22 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let mut db = database::get_database("sqlite://logs.db").await?;
-    let last_timestamp = db.last_timestamp().await?;
+    let mut database = database::get_database("sqlite://logs.db").await?;
+    let last_timestamp = database.last_timestamp().await?;
 
     let logsource = JournaldLogSource::new();
 
     // subscribe before starting the `follow` task
     let logstream = logsource.subscribe();
-    let j1 = tokio::spawn(async move { ingest_logs_job(&mut db, logstream).await });
+    let j1 = tokio::spawn(async move { ingest_logs_job(&mut database, logstream).await });
 
     let j2 = {
         let logsource = logsource.clone();
         tokio::spawn(async move { logsource.follow(last_timestamp).await })
     };
 
-    let j3 = tokio::spawn(websocket::main(logsource));
+    let database = database::get_database("sqlite://logs.db").await?;
+    let j3 = tokio::spawn(websocket::main(logsource, database));
 
     tokio::try_join!(j1, j2, j3)?;
 

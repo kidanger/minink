@@ -33,23 +33,36 @@
 </style>
 
 <form>
-    <input type="checkbox" name="live" id="live-button">
+    <input type="checkbox" name="live" id="live-button"/>
     <label for="live"> LIVE</label>
+    <br/>
+
+    <label for="services-filter">Services:</label>
+    <input type="text" name="services-filter" id="services-filter"/>
+    <br/>
+
+    <label for="message-keywords-filter">Message keywords:</label>
+    <input type="text" name="message-keywords-filter" id="message-keywords-filter"/>
+    <br/>
 </form>
+<br/>
 
 <table id="loglist" class="loglist">
-    <tr>
-        <th style="width: 180px">
-            Date
-        </th>
-        <th style="width: 100px">
-            Host
-        </th>
-        <th style="width: 10%">
-            Service
-        </th>
-        <th>
-            Content
-        </th>
-    </tr>
+    <thead>
+        <tr>
+            <th style="width: 180px">
+                Date
+            </th>
+            <th style="width: 100px">
+                Host
+            </th>
+            <th style="width: 10%">
+                Service
+            </th>
+            <th>
+                Content
+            </th>
+        </tr>
+    </thead>
+    <tbody id="loglist-body"/>
 </table>

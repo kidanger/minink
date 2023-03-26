@@ -19,6 +19,13 @@ impl LogStream {
         Self { receiver, filter }
     }
 
+    pub fn with_filter(self, filter: Filter) -> Self {
+        Self {
+            receiver: self.receiver,
+            filter,
+        }
+    }
+
     pub async fn pull_one(&mut self) -> Result<LogEntry> {
         loop {
             let entry = self.receiver.recv().await?;
