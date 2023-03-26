@@ -28,10 +28,18 @@ struct Args {
     assets_dir: Option<PathBuf>,
 }
 
-async fn ingest_logs_job(db: &mut LogDatabase, mut logstream: LogStream) -> Result<()> {
+async fn ingest_logs_job(mut db: LogDatabase, mut logstream: LogStream) -> Result<()> {
     loop {
         let entry = logstream.pull_one().await?;
         db.insert_log(&entry).await?;
+    }
+}
+
+async fn flatten<T>(handle: tokio::task::JoinHandle<Result<T>>) -> Result<T> {
+    match handle.await {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(err)) => Err(err),
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -50,26 +58,19 @@ async fn main() -> Result<()> {
     let mut database = database::get_database(&args.database_path).await?;
     let last_timestamp = database.last_timestamp().await?;
 
-    let logsource = JournaldLogSource::new();
+    let (logsource, logstream) = JournaldLogSource::new();
 
-    // subscribe before starting the `follow` task
-    let logstream = logsource.subscribe();
-    let j1 = tokio::spawn(async move { ingest_logs_job(&mut database, logstream).await });
-
-    let j2 = {
-        let logsource = logsource.clone();
-        tokio::spawn(async move { logsource.follow(last_timestamp).await })
-    };
-
-    let database = database::get_database(&args.database_path).await?;
+    let j1 = tokio::spawn(ingest_logs_job(database, logstream.clone()));
+    let j2 = tokio::spawn(logsource.follow(last_timestamp));
 
     let server_args = ServerArgs {
         port: args.port,
         assets_dir: args.assets_dir,
     };
-    let j3 = tokio::spawn(server::main(logsource, database, server_args));
+    let database = database::get_database(&args.database_path).await?;
+    let j3 = tokio::spawn(server::main(logstream, database, server_args));
 
-    tokio::try_join!(j1, j2, j3)?;
+    tokio::try_join!(flatten(j1), flatten(j2), flatten(j3))?;
 
     Ok(())
 }

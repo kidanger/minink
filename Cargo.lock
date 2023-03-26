@@ -34,7 +34,7 @@ version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf46fee83e5ccffc220104713af3292ff9bc7c64c7de289f66dae8e38d826833"
 dependencies = [
- "concurrent-queue",
+ "concurrent-queue 2.1.0",
  "event-listener",
  "futures-core",
 ]
@@ -48,7 +48,7 @@ dependencies = [
  "async-lock",
  "autocfg",
  "cfg-if",
- "concurrent-queue",
+ "concurrent-queue 2.1.0",
  "futures-lite",
  "log",
  "parking",
@@ -190,6 +190,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barrage"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be5951c75bdabb58753d140dd5802f12ff3a483cb2e16fb5276e111b94b19e87"
+dependencies = [
+ "concurrent-queue 1.2.4",
+ "event-listener",
+ "spin 0.9.6",
+]
+
+[[package]]
 name = "base64"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -247,6 +258,12 @@ name = "bytes"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89b2fd2a0dcf38d7971e2194b6b6eebab45ae01067456a7fd93d5547a61b70be"
+
+[[package]]
+name = "cache-padded"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1db59621ec70f09c5e9b597b220c7a2b43611f4710dc03ceb8748637775692c"
 
 [[package]]
 name = "cc"
@@ -320,6 +337,15 @@ checksum = "3538270d33cc669650c4b093848450d380def10c331d38c768e34cac80576e6e"
 dependencies = [
  "termcolor",
  "unicode-width",
+]
+
+[[package]]
+name = "concurrent-queue"
+version = "1.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af4780a44ab5696ea9e28294517f1fffb421a83a25af521333c838635509db9c"
+dependencies = [
+ "cache-padded",
 ]
 
 [[package]]
@@ -1019,6 +1045,7 @@ dependencies = [
  "async-process",
  "axum",
  "axum-macros",
+ "barrage",
  "chrono",
  "clap",
  "futures",
@@ -1234,7 +1261,7 @@ dependencies = [
  "autocfg",
  "bitflags",
  "cfg-if",
- "concurrent-queue",
+ "concurrent-queue 2.1.0",
  "libc",
  "log",
  "pin-project-lite",

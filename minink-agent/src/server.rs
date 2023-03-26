@@ -20,26 +20,22 @@ use tower_http::{
     trace::{DefaultMakeSpan, TraceLayer},
 };
 
-use crate::{database::LogDatabase, journald::JournaldLogSource, logstream::LogStream};
+use crate::{database::LogDatabase, logstream::LogStream};
 
 pub struct ServerArgs {
     pub port: u16,
     pub assets_dir: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct AppState {
-    logsource: JournaldLogSource,
+    logstream: Arc<LogStream>,
     database: Arc<Mutex<LogDatabase>>,
 }
 
-pub async fn main(
-    logsource: JournaldLogSource,
-    database: LogDatabase,
-    args: ServerArgs,
-) -> Result<()> {
+pub async fn main(logstream: LogStream, database: LogDatabase, args: ServerArgs) -> Result<()> {
     let appstate = AppState {
-        logsource,
+        logstream: Arc::new(logstream),
         database: Arc::new(Mutex::new(database)),
     };
 
@@ -92,8 +88,8 @@ async fn ws_handler(
         services: parse_query_list(params.services),
         message_keywords: parse_query_list(params.message_keywords),
     };
-    let logstream = state.logsource.subscribe().with_filter(filter);
-    dbg!(&logstream);
+    let logstream = state.logstream.as_ref().clone();
+    let logstream = logstream.with_filter(filter);
     ws.on_upgrade(move |socket| handle_socket(socket, logstream))
 }
 

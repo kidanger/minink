@@ -9,29 +9,22 @@ use futures_lite::{AsyncBufReadExt, StreamExt};
 
 use serde::Deserialize;
 
-use tokio::sync::broadcast;
-
 use minink_common::LogEntry;
 
 use crate::logstream::LogStream;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct JournaldLogSource {
-    sender: broadcast::Sender<LogEntry>,
+    sender: barrage::Sender<LogEntry>,
 }
 
 impl JournaldLogSource {
-    pub fn new() -> Self {
-        let (tx, _) = broadcast::channel(100000);
-        JournaldLogSource { sender: tx }
+    pub fn new() -> (Self, LogStream) {
+        let (tx, rx) = barrage::unbounded();
+        (JournaldLogSource { sender: tx }, LogStream::new(rx))
     }
 
-    pub fn subscribe(&self) -> LogStream {
-        let rx = self.sender.subscribe();
-        LogStream::new(rx)
-    }
-
-    pub async fn follow(&self, since_timestamp: Option<NaiveDateTime>) -> Result<()> {
+    pub async fn follow(self, since_timestamp: Option<NaiveDateTime>) -> Result<()> {
         let since_format = if let Some(since) = since_timestamp {
             let now = chrono::Utc::now().naive_utc();
             let duration = now - since;
@@ -42,22 +35,27 @@ impl JournaldLogSource {
         };
 
         let mut child = Command::new("journalctl")
-        .arg("--follow")
-        .arg("--output=json")
-        .arg("--output-fields=MESSAGE,_HOSTNAME,_SYSTEMD_UNIT,__REALTIME_TIMESTAMP,SYSLOG_IDENTIFIER,_EXE")
-        .arg("--all")
-        .arg(&format!("--since={}", since_format))
-        .stdout(Stdio::piped())
-        .spawn()?;
+            .arg("--follow")
+            .arg("--output=json")
+            .arg("--output-fields=MESSAGE,_HOSTNAME,_SYSTEMD_UNIT,__REALTIME_TIMESTAMP,SYSLOG_IDENTIFIER,_EXE")
+            .arg("--all")
+            .arg(&format!("--since={}", since_format))
+            .stdout(Stdio::piped())
+            .spawn()?;
 
         let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
 
         while let Some(line) = lines.next().await {
             let entry = parse_log_entry(&line?)?;
-            self.sender.send(entry)?;
+            if let Err(e) = self.sender.send_async(entry).await {
+                return Err(anyhow::format_err!("{:?}", e));
+            }
         }
 
-        Ok(())
+        Err(anyhow::format_err!(
+            "journalctl exited: {:?}",
+            child.try_status()
+        ))
     }
 }
 

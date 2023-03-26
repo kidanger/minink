@@ -1,17 +1,17 @@
 use anyhow::Result;
 
+use barrage::{Receiver};
+
 use minink_common::{Filter, LogEntry};
 
-use tokio::sync::broadcast;
-
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct LogStream {
-    receiver: broadcast::Receiver<LogEntry>,
+    receiver: Receiver<LogEntry>,
     filter: Filter,
 }
 
 impl LogStream {
-    pub fn new(receiver: broadcast::Receiver<LogEntry>) -> Self {
+    pub fn new(receiver: Receiver<LogEntry>) -> Self {
         let filter = Filter {
             services: None,
             message_keywords: None,
@@ -28,9 +28,13 @@ impl LogStream {
 
     pub async fn pull_one(&mut self) -> Result<LogEntry> {
         loop {
-            let entry = self.receiver.recv().await?;
-            if self.filter.accept(&entry) {
-                return Ok(entry);
+            match self.receiver.recv_async().await {
+                Ok(entry) => {
+                    if self.filter.accept(&entry) {
+                        return Ok(entry);
+                    }
+                }
+                Err(e) => return Err(anyhow::format_err!("{:?}", e)),
             }
         }
     }
