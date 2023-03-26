@@ -22,19 +22,30 @@ use tower_http::{
 
 use crate::{database::LogDatabase, journald::JournaldLogSource, logstream::LogStream};
 
+pub struct ServerArgs {
+    pub port: u16,
+    pub assets_dir: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone)]
 struct AppState {
     logsource: JournaldLogSource,
     database: Arc<Mutex<LogDatabase>>,
 }
 
-pub async fn main(logsource: JournaldLogSource, database: LogDatabase) -> Result<()> {
+pub async fn main(
+    logsource: JournaldLogSource,
+    database: LogDatabase,
+    args: ServerArgs,
+) -> Result<()> {
     let appstate = AppState {
         logsource,
         database: Arc::new(Mutex::new(database)),
     };
 
-    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let assets_dir = args
+        .assets_dir
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"));
 
     let app = Router::new()
         .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
@@ -46,7 +57,7 @@ pub async fn main(logsource: JournaldLogSource, database: LogDatabase) -> Result
                 .make_span_with(DefaultMakeSpan::default().include_headers(true)),
         );
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
     tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
