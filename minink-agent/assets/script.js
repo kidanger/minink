@@ -1,4 +1,4 @@
-let socket = null;
+let sockets = null;
 
 const debounce = (callback, wait) => {
     let timeoutId = null;
@@ -10,14 +10,24 @@ const debounce = (callback, wait) => {
     };
 };
 
-function build_url(ws) {
+function get_hosts() {
+    const params = new Proxy(new URLSearchParams(window.location.search), {
+        get: (searchParams, prop) => searchParams.get(prop),
+    });
+    const hosts =  params.hosts.split(",");
+    return hosts;
+}
+
+function build_url(hostname, ws) {
     let url
+    hostname = hostname.replace(/\/+$/, "");
     if (ws == true) {
-        url = new URL("/ws/live", window.location.href);
+        url = new URL(hostname + "/ws/live", window.location.href);
         url.protocol = url.protocol.replace('http', 'ws');
     } else {
-        url = new URL("/api/extract", window.location.href);
+        url = new URL(hostname + "/api/extract", window.location.href);
     }
+    console.log(url);
 
     var services = document.getElementById("services-filter").value;
     if (services) {
@@ -41,36 +51,42 @@ function clear_table() {
 }
 
 function populate_a_bit() {
-    let url = build_url(false);
-    fetch(url)
-        .then((response) => response.json())
-        .then((entries) => entries.forEach(add_entry));
+    for (const host of get_hosts()) {
+        let url = build_url(host, false);
+        fetch(url)
+            .then((response) => response.json())
+            .then((entries) => entries.forEach(add_entry));
+    }
 }
 
 function connect() {
     clear_table();
     populate_a_bit();
 
-    let url = build_url(true);
-    console.dir(url);
-    let socket = new WebSocket(url);
+    let sockets = get_hosts().map(host => {
+        let url = build_url(host, true);
+        console.dir(url);
+        let socket = new WebSocket(url);
 
-    socket.addEventListener('open', (event) => {
-        var livebutton = document.getElementById("live-button");
-        livebutton.checked = true;
+        socket.addEventListener('open', (event) => {
+            var livebutton = document.getElementById("live-button");
+            livebutton.checked = true;
+        });
+
+        socket.addEventListener('close', (event) => {
+            var livebutton = document.getElementById("live-button");
+            livebutton.checked = false;
+        });
+
+        socket.addEventListener('message', (event) => {
+            let entry = JSON.parse(event.data);
+            add_entry(entry);
+        });
+
+        return socket;
     });
 
-    socket.addEventListener('close', (event) => {
-        var livebutton = document.getElementById("live-button");
-        livebutton.checked = false;
-    });
-
-    socket.addEventListener('message', (event) => {
-        let entry = JSON.parse(event.data);
-        add_entry(entry);
-    });
-
-    return socket;
+    return sockets;
 }
 
 function add_entry(entry) {
@@ -79,35 +95,41 @@ function add_entry(entry) {
     row.insertCell(0).innerHTML = entry.timestamp;
     row.insertCell(1).innerHTML = entry.hostname;
     row.insertCell(2).innerHTML = entry.service;
-    row.insertCell(3).innerHTML = entry.message;
+    var message = document.createElement("pre");
+    message.appendChild(document.createTextNode(entry.message));
+    row.insertCell(3).appendChild(message);
 }
 
 window.addEventListener("load", () => {
+    const hosts = get_hosts();
+    var hoststext = document.getElementById("hosts");
+    hoststext.value = hosts.join(",");
+
     var livebutton = document.getElementById("live-button");
     livebutton.onchange = (e) => {
         if (livebutton.checked) {
-            socket = connect();
-        } else if (socket !== null) {
-            socket.close();
-            socket = null;
+            sockets = connect();
+        } else if (sockets !== null) {
+            sockets.forEach(s => s.close());
+            sockets = null;
         }
     };
 
     var services_filter = document.getElementById("services-filter");
     services_filter.oninput = debounce((e) => {
-        if (socket !== null) {
-            socket.close();
+        if (sockets !== null) {
+            sockets.forEach(s => s.close());
         }
-        socket = connect();
+        sockets = connect();
     }, 250);
 
     var message_keywords_filter = document.getElementById("message-keywords-filter");
     message_keywords_filter.oninput = debounce((e) => {
-        if (socket !== null) {
-            socket.close();
+        if (sockets !== null) {
+            sockets.forEach(s => s.close());
         }
-        socket = connect();
+        sockets = connect();
     }, 250);
 
-    socket = connect();
+    sockets = connect();
 });
