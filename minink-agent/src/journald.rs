@@ -104,26 +104,11 @@ fn parse_log_entry(line: &str) -> Result<LogEntry> {
     let raw: JournaldRawLogEntry = serde_json::from_str(line)?;
     let timestamp = raw.timestamp.parse()?;
     let timestamp = NaiveDateTime::from_timestamp_micros(timestamp).unwrap();
-    let service = format!(
-        "{}{}{}",
-        if let Some(unit) = &raw.systemd_unit {
-            unit.to_owned() + ";"
-        } else {
-            "".to_string()
-        },
-        if let Some(syslog) = &raw.syslog_identifier {
-            syslog.to_owned() + ";"
-        } else {
-            "".to_string()
-        },
-        if let Some(exe) = &raw.exe {
-            exe.to_owned()
-        } else {
-            "".to_string()
-        }
-    )
-    .trim_end_matches(';')
-    .to_owned();
+    let service = raw
+        .syslog_identifier
+        .or(raw.systemd_unit)
+        .or(raw.exe)
+        .unwrap_or_default();
     let message = raw.message.to_string();
     Ok(LogEntry {
         message,
