@@ -21,6 +21,7 @@ pub struct Filter {
 
 impl Filter {
     pub fn accept(&self, entry: &LogEntry) -> bool {
+        // TODO: be case insensitive
         if let Some(services) = &self.services {
             if !services
                 .iter()
