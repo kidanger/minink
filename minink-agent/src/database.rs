@@ -29,33 +29,31 @@ impl LogDatabase {
         Ok(record.timestamp)
     }
 
-    pub async fn insert_log(&mut self, entry: &LogEntry) -> Result<()> {
-        let mut tx = self.conn.begin().await?;
-        dbg!(&entry);
-        sqlx::query!(
-            r#"insert into logs(message, hostname, service, timestamp)
-            values($1, $2, $3, $4);"#,
-            entry.message,
-            entry.hostname,
-            entry.service,
-            entry.timestamp,
-        )
-        .execute(&mut tx)
-        .await?;
-        Ok(tx.commit().await?)
-    }
-
     pub async fn insert_logs(&mut self, entries: &[LogEntry]) -> Result<()> {
         assert!(entries.len() < 65535 / 4);
-        dbg!(&entries);
 
         let mut tx = self.conn.begin().await?;
-        QueryBuilder::new("insert into logs(message, hostname, service, timestamp) ")
+        let r = QueryBuilder::new("insert into logsfts(service, message) ")
             .push_values(entries, |mut b, entry| {
-                b.push_bind(&entry.message)
-                    .push_bind(&entry.hostname)
-                    .push_bind(&entry.service)
-                    .push_bind(entry.timestamp);
+                b.push_bind(&entry.service).push_bind(&entry.message);
+            })
+            .build()
+            .execute(&mut tx)
+            .await?;
+
+        // I can't find a way to fetch the rowid for each inserts, so instead
+        // I'm assuming that the rowid is only increasing on a bulk insert
+        let lastid = r.last_insert_rowid();
+        let numinserts = r.rows_affected();
+        assert!(numinserts == entries.len() as u64);
+        let mut firstid = (lastid + 1).wrapping_sub(numinserts.try_into().unwrap());
+
+        QueryBuilder::new("insert into logs(hostname, timestamp, logsfts_id) ")
+            .push_values(entries, |mut b, entry| {
+                b.push_bind(&entry.hostname)
+                    .push_bind(entry.timestamp)
+                    .push_bind(firstid);
+                firstid += 1;
             })
             .build()
             .execute(&mut tx)
@@ -68,8 +66,9 @@ impl LogDatabase {
         let mut iter = sqlx::query_as!(
             LogEntry,
             r#"
-            select *
+            select message as "message!: String", hostname, service as 'service!: String', timestamp
             from logs
+            join logsfts fts on fts.rowid == logsfts_id
             order by timestamp desc;
             "#
         )

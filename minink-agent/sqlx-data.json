@@ -1,58 +1,12 @@
 {
   "db": "SQLite",
-  "07d3a9f06731eb335e7f61681028fe1abb133681bcaeb662cf50a4f03caa902a": {
-    "describe": {
-      "columns": [
-        {
-          "name": "message",
-          "ordinal": 0,
-          "type_info": "Text"
-        },
-        {
-          "name": "hostname",
-          "ordinal": 1,
-          "type_info": "Text"
-        },
-        {
-          "name": "service",
-          "ordinal": 2,
-          "type_info": "Text"
-        },
-        {
-          "name": "timestamp",
-          "ordinal": 3,
-          "type_info": "Datetime"
-        }
-      ],
-      "nullable": [
-        false,
-        false,
-        false,
-        false
-      ],
-      "parameters": {
-        "Right": 0
-      }
-    },
-    "query": "\n            select *\n            from logs\n            order by timestamp desc;\n            "
-  },
-  "1c873f4681bff0fa094296e0db7cc10d5238ec0c338b49cde5842086ff50724d": {
-    "describe": {
-      "columns": [],
-      "nullable": [],
-      "parameters": {
-        "Right": 4
-      }
-    },
-    "query": "insert into logs(message, hostname, service, timestamp)\n            values($1, $2, $3, $4);"
-  },
   "42e8ea3b421c7c85c391f98f01d4adf5199a957e222c77cb943a342f22ecdbf0": {
     "describe": {
       "columns": [
         {
           "name": "timestamp: NaiveDateTime",
           "ordinal": 0,
-          "type_info": "Text"
+          "type_info": "Datetime"
         }
       ],
       "nullable": [
@@ -63,5 +17,41 @@
       }
     },
     "query": "select max(timestamp) as 'timestamp: NaiveDateTime' from logs"
+  },
+  "be4c7beec3a455d3a0e4ad6a23dd393233c754f9fa793a4f86932068e5d677ba": {
+    "describe": {
+      "columns": [
+        {
+          "name": "message!: String",
+          "ordinal": 0,
+          "type_info": "Null"
+        },
+        {
+          "name": "hostname",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "service!: String",
+          "ordinal": 2,
+          "type_info": "Null"
+        },
+        {
+          "name": "timestamp",
+          "ordinal": 3,
+          "type_info": "Datetime"
+        }
+      ],
+      "nullable": [
+        true,
+        false,
+        true,
+        false
+      ],
+      "parameters": {
+        "Right": 0
+      }
+    },
+    "query": "\n            select message as \"message!: String\", hostname, service as 'service!: String', timestamp\n            from logs\n            join logsfts fts on fts.rowid == logsfts_id\n            order by timestamp desc;\n            "
   }
 }
