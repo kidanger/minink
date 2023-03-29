@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::Result;
 
 use chrono::NaiveDateTime;
@@ -6,7 +8,10 @@ use futures::TryStreamExt;
 
 use minink_common::{Filter, LogEntry};
 
-use sqlx::{Connection, QueryBuilder, Sqlite, SqliteConnection};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqliteJournalMode},
+    ConnectOptions, Connection, QueryBuilder, SqliteConnection,
+};
 
 #[derive(Debug)]
 pub struct LogDatabase {
@@ -84,12 +89,12 @@ impl LogDatabase {
     }
 }
 
-async fn connect(url: &str) -> Result<SqliteConnection> {
-    Ok(SqliteConnection::connect(url).await?)
-}
-
-pub async fn get_database(url: &str) -> Result<LogDatabase> {
-    let mut conn = connect(url).await?;
+pub async fn get_database(url: &str, read_only: bool) -> Result<LogDatabase> {
+    let mut conn = SqliteConnectOptions::from_str(url)?
+        .journal_mode(SqliteJournalMode::Wal)
+        .read_only(read_only)
+        .connect()
+        .await?;
     sqlx::migrate!().run(&mut conn).await?;
     Ok(LogDatabase { conn })
 }

@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let mut database = database::get_database(&args.database_path).await?;
+    let mut database = database::get_database(&args.database_path, false).await?;
     let last_timestamp = database.last_timestamp().await?;
 
     let (logsource, logstream) = JournaldLogSource::new();
@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
         port: args.port,
         assets_dir: args.assets_dir,
     };
-    let database = database::get_database(&args.database_path).await?;
+    let database = database::get_database(&args.database_path, true).await?;
     let j3 = tokio::spawn(server::main(logstream, database, server_args));
 
     tokio::try_join!(flatten(j1), flatten(j2), flatten(j3))?;
