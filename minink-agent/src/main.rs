@@ -30,7 +30,7 @@ struct Args {
 
 async fn ingest_logs_job(mut db: LogDatabase, mut logstream: LogStream) -> Result<()> {
     // TODO: because of this buffering, recent logs are not visible in the extracts
-    let mut batch = Vec::with_capacity(1024);
+    let mut batch = Vec::with_capacity(24);
     loop {
         while batch.len() < batch.capacity() {
             let entry = logstream.pull_one().await?;

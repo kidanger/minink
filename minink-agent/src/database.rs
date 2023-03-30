@@ -28,6 +28,10 @@ impl LogDatabase {
     }
 
     pub async fn insert_logs(&mut self, entries: &[LogEntry]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
         assert!(entries.len() < 65535 / 4);
 
         let mut tx = self.conn.begin().await?;
@@ -60,16 +64,40 @@ impl LogDatabase {
     }
 
     pub async fn extract(&mut self, filter: &Filter) -> Result<Vec<LogEntry>> {
-        let to_sqlite_phrase = |s: &Vec<String>| {
-            "(".to_owned()
-                + &s.iter()
-                    .map(|s| s.to_owned() + "*")
-                    .collect::<Vec<_>>()
-                    .join(" OR ")
-                + ")"
+        dbg!(&filter);
+        let fts_escape = |s: String| {
+            let s = s.replace(|c: char| !c.is_alphanumeric(), " ");
+            let s = s.trim();
+            if !s.is_empty() {
+                Some(format!("\"{s}\"*"))
+            } else {
+                None
+            }
         };
-        let message = filter.message_keywords.as_ref().map(to_sqlite_phrase);
-        let service = filter.services.as_ref().map(to_sqlite_phrase);
+        // TODO: test this extensively
+        let to_sqlite_phrase = |s: &Vec<String>| {
+            let s = &s
+                .iter()
+                .map(|s| s.to_lowercase())
+                .filter_map(fts_escape)
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            if !s.is_empty() {
+                Some(format!("({s})"))
+            } else {
+                None
+            }
+        };
+        let message = filter
+            .message_keywords
+            .as_ref()
+            .and_then(to_sqlite_phrase)
+            .map(|p| format!("(message: {p})"));
+        let service = filter
+            .services
+            .as_ref()
+            .and_then(to_sqlite_phrase)
+            .map(|p| format!("(service: {p})"));
 
         let mut query = QueryBuilder::new(
             r#"
@@ -78,29 +106,19 @@ impl LogDatabase {
             join logsfts fts on fts.rowid == logs.logsfts_id
             where 1 "#,
         );
-        if let Some(message) = &message {
-            query
-                .push("and logsfts match (('message: ' || ")
-                .push_bind(message)
-                .push(")");
-        }
-        if let Some(service) = &service {
-            if message.is_some() {
-                query.push(" AND ")
-            } else {
-                query.push("and logsfts match (")
-            }
-            .push("('service: ' ||")
-            .push_bind(service)
-            .push(")");
-        }
-        if service.is_some() || message.is_some() {
-            query.push(")");
+        let mut matches = vec![];
+        matches.extend(message);
+        matches.extend(service);
+        let matches = matches.join(" AND ");
+        dbg!(&matches);
+        if !matches.is_empty() {
+            query.push("and logsfts = ").push_bind(matches);
         }
         query.push(
             r#"order by timestamp desc
             limit 100;"#,
         );
+        dbg!(query.sql());
 
         let mut entries: Vec<LogEntry> = query
             .build()
@@ -127,4 +145,113 @@ pub async fn get_database(url: &str, read_only: bool) -> Result<LogDatabase> {
         .await?;
     sqlx::migrate!().run(&mut conn).await?;
     Ok(LogDatabase { conn })
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+    use chrono::NaiveDateTime;
+    use minink_common::{Filter, LogEntry};
+
+    use super::{get_database, LogDatabase};
+
+    async fn prep_db(entries: &[LogEntry]) -> Result<LogDatabase> {
+        let mut db = get_database(":memory:", false).await?;
+        db.insert_logs(entries).await?;
+        Ok(db)
+    }
+
+    fn default_entries() -> Vec<LogEntry> {
+        vec![
+            LogEntry {
+                message: "toto".to_string(),
+                hostname: "localhost".to_string(),
+                service: "nginx".to_string(),
+                timestamp: NaiveDateTime::from_timestamp_micros(0).unwrap(),
+            },
+            LogEntry {
+                message: "TOTO-200".to_string(),
+                hostname: "localhost".to_string(),
+                service: "NGINX".to_string(),
+                timestamp: NaiveDateTime::from_timestamp_micros(1).unwrap(),
+            },
+            LogEntry {
+                message: "titi 20020".to_string(),
+                hostname: "localhost".to_string(),
+                service: "kernel".to_string(),
+                timestamp: NaiveDateTime::from_timestamp_micros(2).unwrap(),
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn test_empty_insert() -> Result<()> {
+        prep_db(&[]).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_extract_all() -> Result<()> {
+        let mut db = prep_db(&default_entries()).await?;
+        let filter = Filter::default();
+        let found = db.extract(&filter).await?;
+        assert_eq!(found.len(), 3);
+        let found2 = default_entries()
+            .into_iter()
+            .filter(|e| filter.accept(e))
+            .collect::<Vec<_>>();
+        assert_eq!(found, found2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_extract_filter_by_message() -> Result<()> {
+        let mut db = prep_db(&default_entries()).await?;
+        let filter = Filter {
+            message_keywords: Some(vec!["200".to_string()]),
+            ..Filter::default()
+        };
+        let found = db.extract(&filter).await?;
+        assert_eq!(found.len(), 2);
+        let found2 = default_entries()
+            .into_iter()
+            .filter(|e| filter.accept(e))
+            .collect::<Vec<_>>();
+        assert_eq!(found, found2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_extract_filter_by_service() -> Result<()> {
+        let mut db = prep_db(&default_entries()).await?;
+        let filter = Filter {
+            services: Some(vec!["n".to_string()]),
+            ..Filter::default()
+        };
+        let found = db.extract(&filter).await?;
+        assert_eq!(found.len(), 2);
+        let found2 = default_entries()
+            .into_iter()
+            .filter(|e| filter.accept(e))
+            .collect::<Vec<_>>();
+        //assert_eq!(found, found2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_extract_filter_by_service_and_message() -> Result<()> {
+        let mut db = prep_db(&default_entries()).await?;
+        let filter = Filter {
+            services: Some(vec!["n".to_string()]),
+            message_keywords: Some(vec!["200".to_string()]),
+        };
+        let found = db.extract(&filter).await?;
+        assert_eq!(found.len(), 1);
+        let found2 = default_entries()
+            .into_iter()
+            .filter(|e| filter.accept(e))
+            .collect::<Vec<_>>();
+        //assert_eq!(found, found2);
+        Ok(())
+    }
 }

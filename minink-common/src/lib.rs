@@ -21,23 +21,26 @@ pub struct Filter {
 
 impl Filter {
     pub fn accept(&self, entry: &LogEntry) -> bool {
-        // TODO: be case insensitive
+        let entry_service = entry.service.to_lowercase();
         if let Some(services) = &self.services {
             if !services
                 .iter()
-                .any(|service| entry.service.contains(service))
+                .any(|service| entry_service.contains(&service.to_lowercase()))
             {
                 return false;
             }
         }
+
+        let entry_message = entry.message.to_lowercase();
         if let Some(message_keywords) = &self.message_keywords {
             if !message_keywords
                 .iter()
-                .any(|keyword| entry.message.contains(keyword))
+                .any(|keyword| entry_message.contains(&keyword.to_lowercase()))
             {
                 return false;
             }
         }
+
         true
     }
 }
