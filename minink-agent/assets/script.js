@@ -27,7 +27,6 @@ function build_url(hostname, ws) {
     } else {
         url = new URL(hostname + "/api/extract", window.location.href);
     }
-    console.log(url);
 
     var services = document.getElementById("services-filter").value;
     if (services) {
@@ -90,6 +89,8 @@ function connect() {
 }
 
 function add_entry(entry) {
+    var autoscroll = window.innerHeight + window.scrollY >= document.body.offsetHeight;
+
     var table = document.getElementById("loglist-body");
     var row = table.insertRow(-1);
     row.insertCell(0).innerHTML = entry.timestamp;
@@ -98,6 +99,10 @@ function add_entry(entry) {
     var message = document.createElement("pre");
     message.appendChild(document.createTextNode(entry.message));
     row.insertCell(3).appendChild(message);
+
+    if (autoscroll) {
+        window.scrollTo(0, document.body.scrollHeight);
+    }
 }
 
 window.addEventListener("load", () => {
