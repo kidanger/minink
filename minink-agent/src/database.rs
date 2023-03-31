@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{ops::Bound, str::FromStr};
 
 use anyhow::Result;
 
@@ -8,7 +8,7 @@ use minink_common::{Filter, LogEntry};
 
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteRow},
-    ConnectOptions, Connection, QueryBuilder, Row, SqliteConnection,
+    ConnectOptions, Connection, QueryBuilder, Row, Sqlite, SqliteConnection,
 };
 
 #[derive(Debug)]
@@ -40,6 +40,41 @@ fn to_sqlite_phrase(m: &[String]) -> Option<String> {
         Some(format!("({s})"))
     } else {
         None
+    }
+}
+
+trait PushToQuery {
+    fn push_to_query(&self, column: &str, query: &mut QueryBuilder<Sqlite>);
+}
+
+impl PushToQuery for (Bound<NaiveDateTime>, Bound<NaiveDateTime>) {
+    fn push_to_query(&self, column: &str, query: &mut QueryBuilder<Sqlite>) {
+        match self.0 {
+            std::ops::Bound::Included(t) => {
+                query
+                    .push(format!(" and unixepoch({column}) >= "))
+                    .push_bind(t.timestamp());
+            }
+            std::ops::Bound::Excluded(t) => {
+                query
+                    .push(format!(" and unixepoch({column}) > "))
+                    .push_bind(t.timestamp());
+            }
+            std::ops::Bound::Unbounded => (),
+        }
+        match self.1 {
+            std::ops::Bound::Included(t) => {
+                query
+                    .push(format!(" and unixepoch({column}) <= "))
+                    .push_bind(t.timestamp());
+            }
+            std::ops::Bound::Excluded(t) => {
+                query
+                    .push(format!(" and unixepoch({column}) < "))
+                    .push_bind(t.timestamp());
+            }
+            std::ops::Bound::Unbounded => (),
+        }
     }
 }
 
@@ -102,22 +137,24 @@ impl LogDatabase {
             .and_then(|a| to_sqlite_phrase(a))
             .map(|p| format!("(service: {p})"));
 
+        let mut matches = vec![];
+        matches.extend(message);
+        matches.extend(service);
+        let matches = matches.join(" AND ");
+
         let mut query = QueryBuilder::new(
             r#"
             select message as "message!: String", hostname as 'hostname!', service as 'service!: String', timestamp as 'timestamp!'
             from logs
             join logsfts fts on fts.rowid == logs.logsfts_id
-            where 1 "#,
+            where 1"#,
         );
-        let mut matches = vec![];
-        matches.extend(message);
-        matches.extend(service);
-        let matches = matches.join(" AND ");
         if !matches.is_empty() {
-            query.push("and logsfts = ").push_bind(matches);
+            query.push(" and logsfts = ").push_bind(matches);
         }
+        filter.timerange.push_to_query("timestamp", &mut query);
         query.push(
-            r#"order by timestamp desc
+            r#" order by timestamp desc
             limit 100;"#,
         );
 
@@ -247,6 +284,7 @@ mod tests {
         let filter = Filter {
             services: Some(vec!["n".to_string()]),
             message_keywords: Some(vec!["200".to_string()]),
+            ..Default::default()
         };
         let found = db.extract(&filter).await?;
         assert_eq!(found.len(), 1);

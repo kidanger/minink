@@ -9,11 +9,12 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use chrono::NaiveDateTime;
 use minink_common::{Filter, LogEntry, ServiceName};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, ops::Bound, path::PathBuf, sync::Arc};
 
 use tower_http::{
     services::ServeDir,
@@ -87,6 +88,7 @@ async fn ws_handler(
     let filter = Filter {
         services: parse_query_list(params.services),
         message_keywords: parse_query_list(params.message_keywords),
+        ..Default::default()
     };
     let logstream = state.logstream.as_ref().clone();
     let logstream = logstream.with_filter(filter);
@@ -113,6 +115,32 @@ struct ExtractParams {
     services: Option<String>,
     #[serde(default)]
     message_keywords: Option<String>,
+    #[serde(default)]
+    start: Option<i64>,
+    #[serde(default)]
+    end: Option<i64>,
+}
+
+impl ExtractParams {
+    fn timerange(&self) -> (Bound<NaiveDateTime>, Bound<NaiveDateTime>) {
+        let timefrom = if let Some(start) = self.start {
+            NaiveDateTime::from_timestamp_micros(start)
+                .map(Bound::Excluded)
+                .unwrap_or(Bound::Unbounded)
+        } else {
+            Bound::Unbounded
+        };
+
+        let timeto = if let Some(end) = self.end {
+            NaiveDateTime::from_timestamp_micros(end)
+                .map(Bound::Excluded)
+                .unwrap_or(Bound::Unbounded)
+        } else {
+            Bound::Unbounded
+        };
+
+        (timefrom, timeto)
+    }
 }
 
 #[axum_macros::debug_handler]
@@ -120,13 +148,17 @@ async fn extract(
     Query(params): Query<ExtractParams>,
     State(state): State<AppState>,
 ) -> Json<Vec<LogEntry>> {
+    let timerange = params.timerange();
     let filter = Filter {
         services: parse_query_list(params.services),
         message_keywords: parse_query_list(params.message_keywords),
+        timerange,
     };
+
     let entries = {
         let mut db = state.database.lock().await;
         db.extract(&filter).await.unwrap()
     };
+
     Json(entries)
 }

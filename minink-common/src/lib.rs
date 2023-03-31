@@ -1,3 +1,5 @@
+use std::ops::{Bound, RangeBounds};
+
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
@@ -11,12 +13,23 @@ pub struct LogEntry {
     pub timestamp: NaiveDateTime,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Filter {
     /// if Some, filter logs with only specific services
     pub services: Option<Vec<ServiceName>>,
     /// if Some, filter logs with that contains one of the keywords in the message
     pub message_keywords: Option<Vec<String>>,
+    pub timerange: (Bound<NaiveDateTime>, Bound<NaiveDateTime>),
+}
+
+impl Default for Filter {
+    fn default() -> Self {
+        Self {
+            services: Default::default(),
+            message_keywords: Default::default(),
+            timerange: (Bound::Unbounded, Bound::Unbounded),
+        }
+    }
 }
 
 fn tokenize(line: &str) -> Vec<String> {
@@ -47,6 +60,10 @@ impl Filter {
             if !matches_patterns(&entry_message_tokens, message_keywords) {
                 return false;
             }
+        }
+
+        if !self.timerange.contains(&entry.timestamp) {
+            return false;
         }
 
         true

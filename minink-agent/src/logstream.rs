@@ -12,10 +12,7 @@ pub struct LogStream {
 
 impl LogStream {
     pub fn new(receiver: Receiver<LogEntry>) -> Self {
-        let filter = Filter {
-            services: None,
-            message_keywords: None,
-        };
+        let filter = Filter::default();
         Self { receiver, filter }
     }
 

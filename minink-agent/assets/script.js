@@ -79,7 +79,7 @@ function connect() {
 
         socket.addEventListener('message', (event) => {
             let entry = JSON.parse(event.data);
-            add_entry(entry);
+            add_entry_and_scroll(entry);
         });
 
         return socket;
@@ -88,9 +88,17 @@ function connect() {
     return sockets;
 }
 
-function add_entry(entry) {
+function add_entry_and_scroll(entry) {
     var autoscroll = window.innerHeight + window.scrollY >= document.body.offsetHeight;
 
+    add_entry(entry);
+
+    if (autoscroll) {
+        window.scrollTo(0, document.body.scrollHeight);
+    }
+}
+
+function add_entry(entry) {
     var table = document.getElementById("loglist-body");
     var row = table.insertRow(-1);
     row.insertCell(0).innerHTML = entry.timestamp;
@@ -99,10 +107,6 @@ function add_entry(entry) {
     var message = document.createElement("pre");
     message.appendChild(document.createTextNode(entry.message));
     row.insertCell(3).appendChild(message);
-
-    if (autoscroll) {
-        window.scrollTo(0, document.body.scrollHeight);
-    }
 }
 
 window.addEventListener("load", () => {
@@ -135,6 +139,12 @@ window.addEventListener("load", () => {
         }
         sockets = connect();
     }, 250);
+
+    window.addEventListener("wheel", debounce((e) => {
+        if (e.deltaY < 0 && window.scrollY == 0) {
+            console.log("fetch some");
+        }
+    }, 200));
 
     sockets = connect();
 });
