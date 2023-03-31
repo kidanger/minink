@@ -19,24 +19,32 @@ pub struct Filter {
     pub message_keywords: Option<Vec<String>>,
 }
 
+fn tokenize(line: &str) -> Vec<String> {
+    let tokens: Vec<String> = line
+        .split_terminator(|c: char| !c.is_alphanumeric())
+        .map(|s| s.to_lowercase())
+        .collect();
+    tokens
+}
+
 impl Filter {
     pub fn accept(&self, entry: &LogEntry) -> bool {
-        let entry_service = entry.service.to_lowercase();
-        if let Some(services) = &self.services {
-            if !services
+        let matches_patterns = |tokens: &[String], patterns: &[String]| -> bool {
+            patterns
                 .iter()
-                .any(|service| entry_service.contains(&service.to_lowercase()))
-            {
+                .any(|pattern| tokens.iter().any(|token| token.starts_with(pattern)))
+        };
+
+        if let Some(services) = &self.services {
+            let entry_service_tokens = tokenize(&entry.service);
+            if !matches_patterns(&entry_service_tokens, services) {
                 return false;
             }
         }
 
-        let entry_message = entry.message.to_lowercase();
         if let Some(message_keywords) = &self.message_keywords {
-            if !message_keywords
-                .iter()
-                .any(|keyword| entry_message.contains(&keyword.to_lowercase()))
-            {
+            let entry_message_tokens = tokenize(&entry.message);
+            if !matches_patterns(&entry_message_tokens, message_keywords) {
                 return false;
             }
         }

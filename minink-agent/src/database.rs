@@ -16,6 +16,33 @@ pub struct LogDatabase {
     conn: SqliteConnection,
 }
 
+fn convert_to_fts_match<S: AsRef<str>>(filter: &[S]) -> String {
+    let fts_escape = |s: String| {
+        let s = s.replace(|c: char| !c.is_alphanumeric(), " ");
+        let s = s.trim();
+        if !s.is_empty() {
+            Some(format!("\"{s}\"*"))
+        } else {
+            None
+        }
+    };
+    filter
+        .iter()
+        .map(|s| str::to_lowercase(s.as_ref()))
+        .filter_map(fts_escape)
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+fn to_sqlite_phrase(m: &[String]) -> Option<String> {
+    let s = convert_to_fts_match(m);
+    if !s.is_empty() {
+        Some(format!("({s})"))
+    } else {
+        None
+    }
+}
+
 impl LogDatabase {
     pub async fn last_timestamp(&mut self) -> Result<Option<NaiveDateTime>> {
         // for some reasons the type cannot be inferred correctly on 'timestamp'
@@ -64,39 +91,15 @@ impl LogDatabase {
     }
 
     pub async fn extract(&mut self, filter: &Filter) -> Result<Vec<LogEntry>> {
-        dbg!(&filter);
-        let fts_escape = |s: String| {
-            let s = s.replace(|c: char| !c.is_alphanumeric(), " ");
-            let s = s.trim();
-            if !s.is_empty() {
-                Some(format!("\"{s}\"*"))
-            } else {
-                None
-            }
-        };
-        // TODO: test this extensively
-        let to_sqlite_phrase = |s: &Vec<String>| {
-            let s = &s
-                .iter()
-                .map(|s| s.to_lowercase())
-                .filter_map(fts_escape)
-                .collect::<Vec<_>>()
-                .join(" OR ");
-            if !s.is_empty() {
-                Some(format!("({s})"))
-            } else {
-                None
-            }
-        };
         let message = filter
             .message_keywords
             .as_ref()
-            .and_then(to_sqlite_phrase)
+            .and_then(|a| to_sqlite_phrase(a))
             .map(|p| format!("(message: {p})"));
         let service = filter
             .services
             .as_ref()
-            .and_then(to_sqlite_phrase)
+            .and_then(|a| to_sqlite_phrase(a))
             .map(|p| format!("(service: {p})"));
 
         let mut query = QueryBuilder::new(
@@ -110,7 +113,6 @@ impl LogDatabase {
         matches.extend(message);
         matches.extend(service);
         let matches = matches.join(" AND ");
-        dbg!(&matches);
         if !matches.is_empty() {
             query.push("and logsfts = ").push_bind(matches);
         }
@@ -118,7 +120,6 @@ impl LogDatabase {
             r#"order by timestamp desc
             limit 100;"#,
         );
-        dbg!(query.sql());
 
         let mut entries: Vec<LogEntry> = query
             .build()
@@ -152,6 +153,8 @@ mod tests {
     use anyhow::Result;
     use chrono::NaiveDateTime;
     use minink_common::{Filter, LogEntry};
+
+    use crate::database::convert_to_fts_match;
 
     use super::{get_database, LogDatabase};
 
@@ -234,7 +237,7 @@ mod tests {
             .into_iter()
             .filter(|e| filter.accept(e))
             .collect::<Vec<_>>();
-        //assert_eq!(found, found2);
+        assert_eq!(found, found2);
         Ok(())
     }
 
@@ -251,7 +254,24 @@ mod tests {
             .into_iter()
             .filter(|e| filter.accept(e))
             .collect::<Vec<_>>();
-        //assert_eq!(found, found2);
+        assert_eq!(found, found2);
         Ok(())
+    }
+
+    #[test]
+    fn test_convert_to_fts_match() {
+        assert_eq!(convert_to_fts_match::<&str>(&[]), "");
+        assert_eq!(convert_to_fts_match(&["bla"]), "\"bla\"*");
+        assert_eq!(convert_to_fts_match(&["bla bla"]), "\"bla bla\"*");
+        assert_eq!(
+            convert_to_fts_match(&["bla ", " blo"]),
+            "\"bla\"* OR \"blo\"*"
+        );
+        assert_eq!(convert_to_fts_match(&["AB©d"]), "\"ab d\"*");
+        assert_eq!(
+            convert_to_fts_match(&["A OR B", "AND C"]),
+            "\"a or b\"* OR \"and c\"*"
+        );
+        assert_eq!(convert_to_fts_match(&["\""]), "");
     }
 }

@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use barrage::{Receiver};
+use barrage::Receiver;
 
 use minink_common::{Filter, LogEntry};
 
