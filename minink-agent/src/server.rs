@@ -12,7 +12,6 @@ use axum::{
 use chrono::NaiveDateTime;
 use minink_common::{Filter, LogEntry, ServiceName};
 use serde::Deserialize;
-use tokio::sync::Mutex;
 
 use std::{net::SocketAddr, ops::Bound, path::PathBuf, sync::Arc};
 
@@ -31,13 +30,13 @@ pub struct ServerArgs {
 #[derive(Clone)]
 struct AppState {
     logstream: Arc<LogStream>,
-    database: Arc<Mutex<LogDatabase>>,
+    database: LogDatabase,
 }
 
 pub async fn main(logstream: LogStream, database: LogDatabase, args: ServerArgs) -> Result<()> {
     let appstate = AppState {
         logstream: Arc::new(logstream),
-        database: Arc::new(Mutex::new(database)),
+        database,
     };
 
     let assets_dir = args
@@ -155,10 +154,8 @@ async fn extract(
         timerange,
     };
 
-    let entries = {
-        let mut db = state.database.lock().await;
-        db.extract(&filter).await.unwrap()
-    };
+    let db = state.database;
+    let entries = { db.extract(&filter).await.unwrap() };
 
     Json(entries)
 }

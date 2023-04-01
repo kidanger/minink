@@ -1,4 +1,4 @@
-use std::{ops::Bound, str::FromStr};
+use std::{ops::Bound, str::FromStr, sync::Arc};
 
 use anyhow::Result;
 
@@ -8,12 +8,15 @@ use minink_common::{Filter, LogEntry};
 
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteRow},
-    ConnectOptions, Connection, QueryBuilder, Row, Sqlite, SqliteConnection,
+    ConnectOptions, QueryBuilder, Row, Sqlite, SqlitePool,
 };
 
-#[derive(Debug)]
+use tokio::sync::Mutex;
+
+#[derive(Debug, Clone)]
 pub struct LogDatabase {
-    conn: SqliteConnection,
+    pool: SqlitePool,
+    entries: Arc<Mutex<Vec<LogEntry>>>,
 }
 
 fn convert_to_fts_match<S: AsRef<str>>(filter: &[S]) -> String {
@@ -79,24 +82,35 @@ impl PushToQuery for (Bound<NaiveDateTime>, Bound<NaiveDateTime>) {
 }
 
 impl LogDatabase {
-    pub async fn last_timestamp(&mut self) -> Result<Option<NaiveDateTime>> {
+    pub async fn new(url: &str) -> Result<Self> {
+        let mut options = SqliteConnectOptions::from_str(url)?.journal_mode(SqliteJournalMode::Wal);
+        options.log_statements(tracing::log::LevelFilter::Info);
+        let pool = SqlitePool::connect_with(options).await?;
+        sqlx::migrate!().run(&pool).await?;
+        Ok(Self {
+            pool,
+            entries: Arc::new(Mutex::new(Vec::new())),
+        })
+    }
+
+    pub async fn last_timestamp(&self) -> Result<Option<NaiveDateTime>> {
         // for some reasons the type cannot be inferred correctly on 'timestamp'
         let record =
             sqlx::query!(r#"select max(timestamp) as 'timestamp: NaiveDateTime' from logs"#)
-                .fetch_one(&mut self.conn)
+                .fetch_one(&self.pool)
                 .await?;
 
         Ok(record.timestamp)
     }
 
-    pub async fn insert_logs(&mut self, entries: &[LogEntry]) -> Result<()> {
+    async fn insert_logs(&self, entries: &[LogEntry]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
 
         assert!(entries.len() < 65535 / 4);
 
-        let mut tx = self.conn.begin().await?;
+        let mut tx = self.pool.begin().await?;
         let r = QueryBuilder::new("insert into logsfts(service, message) ")
             .push_values(entries, |mut b, entry| {
                 b.push_bind(&entry.service).push_bind(&entry.message);
@@ -125,7 +139,28 @@ impl LogDatabase {
         Ok(tx.commit().await?)
     }
 
-    pub async fn extract(&mut self, filter: &Filter) -> Result<Vec<LogEntry>> {
+    pub async fn add_log(&self, entry: LogEntry) -> Result<()> {
+        let sync = {
+            let mut entries = self.entries.lock().await;
+            entries.push(entry);
+            entries.len() > 1024
+        };
+        if sync {
+            self.sync_logs().await?;
+        }
+        Ok(())
+    }
+
+    async fn sync_logs(&self) -> Result<()> {
+        let mut entries = self.entries.lock().await;
+        self.insert_logs(&entries).await?;
+        entries.clear();
+        Ok(())
+    }
+
+    pub async fn extract(&self, filter: &Filter) -> Result<Vec<LogEntry>> {
+        self.sync_logs().await?;
+
         let message = filter
             .message_keywords
             .as_ref()
@@ -166,23 +201,12 @@ impl LogDatabase {
                 service: a.get(2),
                 timestamp: a.get(3),
             })
-            .fetch_all(&mut self.conn)
+            .fetch_all(&self.pool)
             .await?;
 
         entries.reverse();
         Ok(entries)
     }
-}
-
-pub async fn get_database(url: &str, read_only: bool) -> Result<LogDatabase> {
-    let mut conn = SqliteConnectOptions::from_str(url)?
-        .journal_mode(SqliteJournalMode::Wal)
-        .read_only(read_only)
-        .log_statements(tracing::log::LevelFilter::Info)
-        .connect()
-        .await?;
-    sqlx::migrate!().run(&mut conn).await?;
-    Ok(LogDatabase { conn })
 }
 
 #[cfg(test)]
@@ -193,10 +217,10 @@ mod tests {
 
     use crate::database::convert_to_fts_match;
 
-    use super::{get_database, LogDatabase};
+    use super::LogDatabase;
 
     async fn prep_db(entries: &[LogEntry]) -> Result<LogDatabase> {
-        let mut db = get_database(":memory:", false).await?;
+        let db = LogDatabase::new(":memory:").await?;
         db.insert_logs(entries).await?;
         Ok(db)
     }
@@ -232,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_extract_all() -> Result<()> {
-        let mut db = prep_db(&default_entries()).await?;
+        let db = prep_db(&default_entries()).await?;
         let filter = Filter::default();
         let found = db.extract(&filter).await?;
         assert_eq!(found.len(), 3);
@@ -246,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_extract_filter_by_message() -> Result<()> {
-        let mut db = prep_db(&default_entries()).await?;
+        let db = prep_db(&default_entries()).await?;
         let filter = Filter {
             message_keywords: Some(vec!["200".to_string()]),
             ..Filter::default()
@@ -263,7 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_extract_filter_by_service() -> Result<()> {
-        let mut db = prep_db(&default_entries()).await?;
+        let db = prep_db(&default_entries()).await?;
         let filter = Filter {
             services: Some(vec!["n".to_string()]),
             ..Filter::default()
@@ -280,7 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_extract_filter_by_service_and_message() -> Result<()> {
-        let mut db = prep_db(&default_entries()).await?;
+        let db = prep_db(&default_entries()).await?;
         let filter = Filter {
             services: Some(vec!["n".to_string()]),
             message_keywords: Some(vec!["200".to_string()]),
