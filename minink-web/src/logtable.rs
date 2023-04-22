@@ -12,6 +12,7 @@ pub struct LogTableProps {
 pub fn logtable(LogTableProps { entries }: &LogTableProps) -> Html {
     log!("rendering the log table");
     html! {
+        <div class="tableFixHead">
         <table id="loglist" class="loglist">
             <thead>
                 <tr>
@@ -55,5 +56,7 @@ pub fn logtable(LogTableProps { entries }: &LogTableProps) -> Html {
                 }
             </tbody>
         </table>
+        </div>
+
     }
 }
