@@ -16,6 +16,7 @@ use serde::Deserialize;
 use std::{net::SocketAddr, ops::Bound, path::PathBuf, sync::Arc};
 
 use tower_http::{
+    cors::CorsLayer,
     services::ServeDir,
     trace::{DefaultMakeSpan, TraceLayer},
 };
@@ -43,11 +44,18 @@ pub async fn main(logstream: LogStream, database: LogDatabase, args: ServerArgs)
         .assets_dir
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"));
 
+    let cors = CorsLayer::new()
+        // allow `GET` and `POST` when accessing the resource
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+        // allow requests from any origin
+        .allow_origin(tower_http::cors::Any);
+
     let app = Router::new()
         .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
         .route("/ws/live", get(ws_handler))
         .route("/api/extract", get(extract))
         .with_state(appstate)
+        .layer(cors)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::default().include_headers(true)),
