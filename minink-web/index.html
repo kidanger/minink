@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+    <meta charset="UTF-8" />
+    <head>
+        <style>
+        .loglist {
+            font-family: monospace;
+            border-collapse: collapse;
+
+            table-layout: fixed;
+            width: 100%;
+        }
+
+        .loglist th {
+            border: 1px solid #666;
+            padding: 8px;
+        }
+
+        .loglist td {
+            border: 1px solid #AAA;
+            padding: 3px;
+            overflow: clip;
+            white-space: nowrap;
+        }
+
+        pre::-webkit-scrollbar {
+            display: none;
+        }
+        .loglist td pre {
+            margin: 0px;
+            overflow: auto;
+            scrollbar-width: none;
+        }
+
+        .loglist tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        </style>
+    </head>
+    <body>
+    </body>
+</html>

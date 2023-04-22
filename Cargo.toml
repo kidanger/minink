@@ -2,6 +2,7 @@
 members = [
     "minink-agent",
     "minink-common",
+    "minink-web",
 ]
 
 [profile.dev.package.sqlx-macros]
