@@ -7,9 +7,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-async-process = "1.6.0"
-chrono = { version = "0.4.24", features = ["clock", "serde"] }
-futures-lite = "1.12.0"
+async-process = "1.6"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+futures-lite = "1.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.6", features = ["runtime-tokio-rustls", "sqlite", "chrono", "offline"] }
@@ -18,9 +18,9 @@ minink-common = { path = "../minink-common/" }
 
 axum = { version = "0.6", features = ["ws", "headers"] }
 headers = "0.3"
-tower-http = { version = "0.4.0", features = ["fs", "trace", "cors"] }
+tower-http = { version = "0.4", features = ["fs", "trace", "cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-axum-macros = "0.3.7"
-clap = { version = "4.1.13", features = ["derive"] }
-barrage = "0.2.3"
+axum-macros = "0.3"
+clap = { version = "4.1", features = ["derive"] }
+barrage = "0.2"
