@@ -14,6 +14,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod database;
 mod journald;
+mod logdispatcher;
 mod logstream;
 mod server;
 
@@ -30,12 +31,6 @@ struct Args {
 }
 
 async fn ingest_logs_job(db: LogDatabase, mut logstream: LogStream) -> Result<()> {
-    //let mut batch = Vec::with_capacity(24);
-    //while batch.len() < batch.capacity() {
-    //batch.push(entry);
-    //}
-    //db.insert_logs().await?;
-    //batch.clear();
     loop {
         let entry = logstream.pull_one().await?;
         db.add_log(entry).await?;
@@ -65,16 +60,16 @@ async fn main() -> Result<()> {
     let database = LogDatabase::new(&args.database_path).await?;
     let last_timestamp = database.last_timestamp().await?;
 
-    let (logsource, logstream) = JournaldLogSource::new();
+    let (logsource, dispatcher) = JournaldLogSource::new();
 
-    let j1 = tokio::spawn(ingest_logs_job(database.clone(), logstream.clone()));
+    let j1 = tokio::spawn(ingest_logs_job(database.clone(), dispatcher.stream()));
     let j2 = tokio::spawn(logsource.follow(last_timestamp));
 
     let server_args = ServerArgs {
         port: args.port,
         assets_dir: args.assets_dir,
     };
-    let j3 = tokio::spawn(server::main(logstream, database, server_args));
+    let j3 = tokio::spawn(server::main(dispatcher, database, server_args));
 
     tokio::try_join!(flatten(j1), flatten(j2), flatten(j3))?;
 

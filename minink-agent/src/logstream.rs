@@ -1,17 +1,20 @@
 use anyhow::Result;
 
-use barrage::Receiver;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use minink_common::{Filter, LogEntry};
 
-#[derive(Clone)]
+#[derive(thiserror::Error, Debug)]
+#[error("LogStream closed")]
+pub struct ClosedStream {}
+
 pub struct LogStream {
-    receiver: Receiver<LogEntry>,
+    receiver: UnboundedReceiver<LogEntry>,
     filter: Filter,
 }
 
 impl LogStream {
-    pub fn new(receiver: Receiver<LogEntry>) -> Self {
+    pub fn new(receiver: UnboundedReceiver<LogEntry>) -> Self {
         let filter = Filter::default();
         Self { receiver, filter }
     }
@@ -23,15 +26,15 @@ impl LogStream {
         }
     }
 
-    pub async fn pull_one(&mut self) -> Result<LogEntry> {
+    pub async fn pull_one(&mut self) -> Result<LogEntry, ClosedStream> {
         loop {
-            match self.receiver.recv_async().await {
-                Ok(entry) => {
+            match self.receiver.recv().await {
+                Some(entry) => {
                     if self.filter.accept(&entry) {
                         return Ok(entry);
                     }
                 }
-                Err(e) => return Err(anyhow::format_err!("{:?}", e)),
+                None => return Err(ClosedStream {}),
             }
         }
     }

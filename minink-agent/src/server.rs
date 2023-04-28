@@ -13,7 +13,12 @@ use chrono::NaiveDateTime;
 use minink_common::{Filter, LogEntry, ServiceName};
 use serde::Deserialize;
 
-use std::{net::SocketAddr, ops::Bound, path::PathBuf, sync::Arc};
+use std::{
+    net::SocketAddr,
+    ops::Bound,
+    path::PathBuf,
+    sync::{Arc},
+};
 
 use tower_http::{
     cors::CorsLayer,
@@ -21,7 +26,7 @@ use tower_http::{
     trace::{DefaultMakeSpan, TraceLayer},
 };
 
-use crate::{database::LogDatabase, logstream::LogStream};
+use crate::{database::LogDatabase, logdispatcher::LogDispatcher, logstream::LogStream};
 
 pub struct ServerArgs {
     pub port: u16,
@@ -30,13 +35,17 @@ pub struct ServerArgs {
 
 #[derive(Clone)]
 struct AppState {
-    logstream: Arc<LogStream>,
+    dispatcher: Arc<LogDispatcher>,
     database: LogDatabase,
 }
 
-pub async fn main(logstream: LogStream, database: LogDatabase, args: ServerArgs) -> Result<()> {
+pub async fn main(
+    logdispatcher: Arc<LogDispatcher>,
+    database: LogDatabase,
+    args: ServerArgs,
+) -> Result<()> {
     let appstate = AppState {
-        logstream: Arc::new(logstream),
+        dispatcher: logdispatcher,
         database,
     };
 
@@ -97,7 +106,7 @@ async fn ws_handler(
         message_keywords: parse_query_list(params.message_keywords),
         ..Default::default()
     };
-    let logstream = state.logstream.as_ref().clone();
+    let logstream = state.dispatcher.stream();
     let logstream = logstream.with_filter(filter);
     ws.on_upgrade(move |socket| handle_socket(socket, logstream))
 }

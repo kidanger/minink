@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 
 use async_process::{Command, Stdio};
@@ -11,17 +13,22 @@ use serde::Deserialize;
 
 use minink_common::LogEntry;
 
-use crate::logstream::LogStream;
+use crate::logdispatcher::LogDispatcher;
 
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct JournaldLogSource {
-    sender: barrage::Sender<LogEntry>,
+    dispatcher: Arc<LogDispatcher>,
 }
 
 impl JournaldLogSource {
-    pub fn new() -> (Self, LogStream) {
-        let (tx, rx) = barrage::unbounded();
-        (JournaldLogSource { sender: tx }, LogStream::new(rx))
+    pub fn new() -> (Self, Arc<LogDispatcher>) {
+        let dispatcher = Arc::new(LogDispatcher::new());
+        (
+            JournaldLogSource {
+                dispatcher: dispatcher.clone(),
+            },
+            dispatcher,
+        )
     }
 
     pub async fn follow(self, since_timestamp: Option<NaiveDateTime>) -> Result<()> {
@@ -47,9 +54,7 @@ impl JournaldLogSource {
 
         while let Some(line) = lines.next().await {
             let entry = parse_log_entry(&line?)?;
-            if let Err(e) = self.sender.send_async(entry).await {
-                return Err(anyhow::format_err!("{:?}", e));
-            }
+            self.dispatcher.send(entry);
         }
 
         Err(anyhow::format_err!(
