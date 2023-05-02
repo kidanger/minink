@@ -108,11 +108,32 @@ async fn ws_handler(
 }
 
 async fn handle_socket(socket: WebSocket, logstream: LogStream) {
+    // {"filter":{"services":null,"message_keywords":null,"timerange":["Unbounded","Unbounded"]}}
+    // {"filter":{"services":null,"message_keywords":["aa"],"timerange":["Unbounded","Unbounded"]}}
+    #[derive(Debug, Deserialize)]
+    struct ClientCommand {
+        filter: Filter,
+    }
+
     async fn work(mut socket: WebSocket, mut logstream: LogStream) -> Result<()> {
         loop {
-            let entry = logstream.pull_one().await?;
-            let payload = serde_json::to_string(&entry)?;
-            socket.send(Message::Text(payload)).await?;
+            tokio::select! {
+                entry = logstream.pull_one() => {
+                    let entry = entry?;
+                    let payload = serde_json::to_string(&entry)?;
+                    socket.send(Message::Text(payload)).await?;
+                },
+                msg = socket.recv() => {
+                    match msg {
+                        Some(Ok(Message::Text(t))) => {
+                            let cmd: ClientCommand = serde_json::from_str(&t)?;
+                            logstream = logstream.with_filter(cmd.filter);
+                        },
+                        Some(_) => anyhow::bail!("websocket error or invalid message"),
+                        None => anyhow::bail!("websocket connection closed"),
+                    }
+                }
+            }
         }
     }
 
