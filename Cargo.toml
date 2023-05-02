@@ -3,6 +3,7 @@ members = [
     "minink-agent",
     "minink-common",
     "minink-web",
+    "minink-tui",
 ]
 
 [profile.dev.package.sqlx-macros]
