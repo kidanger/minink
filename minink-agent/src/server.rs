@@ -6,19 +6,14 @@ use axum::{
         Query, State,
     },
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use chrono::NaiveDateTime;
 use minink_common::{Filter, LogEntry, ServiceName};
 use serde::Deserialize;
 
-use std::{
-    net::SocketAddr,
-    ops::Bound,
-    path::PathBuf,
-    sync::{Arc},
-};
+use std::{net::SocketAddr, ops::Bound, path::PathBuf, sync::Arc};
 
 use tower_http::{
     cors::CorsLayer,
@@ -63,6 +58,7 @@ pub async fn main(
         .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
         .route("/ws/live", get(ws_handler))
         .route("/api/extract", get(extract))
+        .route("/api/extract", post(post_extract))
         .with_state(appstate)
         .layer(cors)
         .layer(
@@ -137,6 +133,17 @@ struct ExtractParams {
     end: Option<i64>,
 }
 
+impl From<ExtractParams> for Filter {
+    fn from(value: ExtractParams) -> Self {
+        let timerange = value.timerange();
+        Self {
+            services: parse_query_list(value.services),
+            message_keywords: parse_query_list(value.message_keywords),
+            timerange,
+        }
+    }
+}
+
 impl ExtractParams {
     fn timerange(&self) -> (Bound<NaiveDateTime>, Bound<NaiveDateTime>) {
         let timefrom = if let Some(start) = self.start {
@@ -164,13 +171,19 @@ async fn extract(
     Query(params): Query<ExtractParams>,
     State(state): State<AppState>,
 ) -> Json<Vec<LogEntry>> {
-    let timerange = params.timerange();
-    let filter = Filter {
-        services: parse_query_list(params.services),
-        message_keywords: parse_query_list(params.message_keywords),
-        timerange,
-    };
+    let filter = params.into();
 
+    let db = state.database;
+    let entries = { db.extract(&filter).await.unwrap() };
+
+    Json(entries)
+}
+
+#[axum_macros::debug_handler]
+async fn post_extract(
+    State(state): State<AppState>,
+    Json(filter): Json<Filter>,
+) -> Json<Vec<LogEntry>> {
     let db = state.database;
     let entries = { db.extract(&filter).await.unwrap() };
 
