@@ -1,7 +1,12 @@
 use anyhow::Result;
-
+use futures::{
+    stream::{FuturesUnordered, SplitSink, SplitStream},
+    StreamExt,
+};
 use minink_common::{Filter, LogEntry};
 use ratatui::widgets::TableState;
+use tokio::net::TcpStream;
+use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 pub struct StatefulTable<T> {
     pub state: TableState,
@@ -39,18 +44,40 @@ impl<T> StatefulTable<T> {
                 (_, Some(cur)) => Some(cur - 1),
             });
     }
+
+    pub fn following(&self) -> bool {
+        let n = self.items.len();
+        match self.state.selected() {
+            Some(i) => i + 1 == n,
+            None => true,
+        }
+    }
+
+    pub fn push(&mut self, entry: T) {
+        let following = self.following();
+        self.items.push(entry);
+        if following {
+            let n = self.items.len();
+            self.state.select(Some(n - 1));
+        }
+    }
+}
+
+pub struct EndpointConnection {
+    write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
 }
 
 pub struct Endpoint {
     pub url: String,
-    pub connected: bool,
+    pub connection: Option<EndpointConnection>,
 }
 
 impl Endpoint {
     pub fn new(url: &str) -> Self {
         Self {
             url: url.to_string(),
-            connected: false,
+            connection: None,
         }
     }
 }
@@ -103,24 +130,53 @@ impl App {
 }
 
 impl App {
+    pub async fn process_connections(&mut self) -> Result<()> {
+        let mut futures = FuturesUnordered::new();
+        for e in &mut self.endpoints {
+            if let Some(connection) = &mut e.connection {
+                let f = connection.read.next();
+                futures.push(f);
+            }
+        }
+
+        if let Some(a) = futures.next().await {
+            match a {
+                Some(Ok(Message::Text(t))) => {
+                    let entry: LogEntry = serde_json::from_str(&t)?;
+                    self.logs.push(entry);
+                }
+                _ => {
+                    todo!("{:?}", a)
+                }
+            }
+        } else {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        Ok(())
+    }
+
     pub async fn refresh(&mut self) -> Result<()> {
         self.logs.state = TableState::default();
         self.logs.items.clear();
         let filter = &self.filter;
         for e in &mut self.endpoints {
-            if !e.connected {
-                let client = reqwest::Client::new();
-                let res = client
-                    .post(format!("{}/api/extract", e.url))
-                    .json(filter)
-                    .send()
-                    .await?
-                    .json::<Vec<LogEntry>>()
-                    .await?;
+            let client = reqwest::Client::new();
+            let res = client
+                .post(format!("{}/api/extract", e.url))
+                .json(filter)
+                .send()
+                .await?
+                .json::<Vec<LogEntry>>()
+                .await?;
 
-                self.logs.items.extend(res);
-            }
+            self.logs.items.extend(res);
+
+            let ws_url = e.url.replace("http", "ws") + "/ws/live";
+            let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url).await?;
+            let (write, read) = ws_stream.split();
+            e.connection = Some(EndpointConnection { write, read });
         }
+
         Ok(())
     }
 }

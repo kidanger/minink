@@ -1,14 +1,13 @@
 use std::io;
 
 use anyhow::Result;
-
 use clap::Parser;
 use crossterm::{
     event::{Event, EventStream, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use futures::{select, FutureExt, StreamExt};
+use futures::StreamExt;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     Terminal,
@@ -56,10 +55,8 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result
     loop {
         terminal.draw(|f| ui::draw(f, &mut app))?;
 
-        let mut event = reader.next().fuse();
-
-        select! {
-            maybe_event = event => {
+        tokio::select! {
+            maybe_event = reader.next() => {
                 match maybe_event {
                     Some(Ok(Event::Key(key))) => {
                         if key.kind == KeyEventKind::Press {
@@ -77,7 +74,9 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result
                     Some(Err(e)) => println!("Error: {:?}\r", e),
                     None => break,
                 }
-            }
+            },
+            // this means one refresh per websocket message
+            _ = app.process_connections() => {},
         };
 
         if app.should_quit {
